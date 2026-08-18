@@ -1,0 +1,17 @@
+date,product,region,quantity,price
+2025-01-05,Laptop,North,2,1200
+2025-01-08,Phone,South,5,700
+2025-01-12,Headphones,East,10,100
+2025-01-18,Monitor,West,3,400
+2025-02-03,Laptop,North,3,1200
+2025-02-10,Phone,South,4,700
+2025-02-15,Headphones,East,15,100
+2025-02-21,Monitor,West,5,400
+2025-03-02,Laptop,North,4,1200
+2025-03-09,Phone,South,6,700
+2025-03-15,Headphones,East,12,100
+2025-03-22,Monitor,West,4,400
+2025-04-05,Laptop,North,5,1200
+2025-04-12,Phone,South,3,700
+2025-04-19,Headphones,East,18,100
+2025-04-25,Monitor,West,6,400
