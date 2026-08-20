@@ -5,11 +5,14 @@ import uuid
 from ollama import chat
 
 from .tools import load_data
-from .tool_registry import TOOLS, AVAILABLE_TOOLS
+from .tool_registry import TOOLS
+from .memory import ConversationMemory
+from .tracing import AgentTracer
+from .tool_executor import execute_tool
 
 
 # --------------------------------------------------
-# Load dataset once
+# Dataset
 # --------------------------------------------------
 
 df = load_data()
@@ -19,7 +22,7 @@ df = load_data()
 # Conversation memory
 # --------------------------------------------------
 
-CONVERSATIONS = {}
+memory = ConversationMemory()
 
 
 # --------------------------------------------------
@@ -68,6 +71,7 @@ IMPORTANT RULES:
    get_best_region
 
    IMPORTANT:
+
    Words such as:
    - best area
    - best region
@@ -124,76 +128,47 @@ IMPORTANT RULES:
     Actually call the tool when needed.
 """
 
-# --------------------------------------------------
-# Execute tool
-# --------------------------------------------------
-
-def execute_tool(tool_call):
-    """
-    Execute one tool selected by the LLM.
-    """
-
-    tool_name = tool_call.function.name
-    arguments = tool_call.function.arguments or {}
-
-    function_to_call = AVAILABLE_TOOLS.get(tool_name)
-
-    if function_to_call is None:
-        return {
-            "success": False,
-            "error_type": "UNKNOWN_TOOL",
-            "message": f"Tool '{tool_name}' is not registered.",
-        }
-
-    try:
-        result = function_to_call(
-            df,
-            **arguments,
-        )
-
-        return result
-
-    except Exception as e:
-        return {
-            "success": False,
-            "error_type": "TOOL_EXECUTION_ERROR",
-            "message": str(e),
-        }
-
 
 # --------------------------------------------------
-# Run agent
+# Run KUDOO agent
 # --------------------------------------------------
 
 def run_agent(user_question, conversation_id=None):
 
     start_time = time.perf_counter()
 
+    tracer = AgentTracer()
+
+    tracer.start(user_question)
+
     # --------------------------------------------------
-    # Create conversation if necessary
+    # Create conversation ID
     # --------------------------------------------------
 
     if not conversation_id:
         conversation_id = str(uuid.uuid4())
 
-    if conversation_id not in CONVERSATIONS:
-        CONVERSATIONS[conversation_id] = []
+    # --------------------------------------------------
+    # Retrieve conversation history
+    # --------------------------------------------------
 
-    conversation = CONVERSATIONS[conversation_id]
+    conversation = memory.get(conversation_id)
 
     # --------------------------------------------------
     # Add user message
     # --------------------------------------------------
 
-    conversation.append(
-        {
-            "role": "user",
-            "content": user_question,
-        }
+    memory.add(
+        conversation_id=conversation_id,
+        role="user",
+        content=user_question,
     )
 
+    # Refresh conversation after adding the message
+    conversation = memory.get(conversation_id)
+
     # --------------------------------------------------
-    # Build messages for LLM
+    # Build LLM messages
     # --------------------------------------------------
 
     messages = [
@@ -210,10 +185,6 @@ def run_agent(user_question, conversation_id=None):
     # --------------------------------------------------
 
     while True:
-
-        # --------------------------------------------------
-        # Measure LLM response time
-        # --------------------------------------------------
 
         llm_start = time.perf_counter()
 
@@ -233,39 +204,39 @@ def run_agent(user_question, conversation_id=None):
             - llm_start
         )
 
+        tool_calls = response.message.tool_calls or []
+
         print(
             f"[LLM] {llm_duration:.2f}s | "
-            f"tool_calls={len(response.message.tool_calls or [])}"
+            f"tool_calls={len(tool_calls)}"
         )
 
         # --------------------------------------------------
-        # No tool required
+        # Final answer
         # --------------------------------------------------
 
-        if not response.message.tool_calls:
+        if not tool_calls:
 
             final_answer = (
                 response.message.content
                 or "I could not determine an answer."
             )
 
-            # Save final assistant response
-            conversation.append(
-                {
-                    "role": "assistant",
-                    "content": final_answer,
-                }
+            memory.add(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=final_answer,
             )
 
             break
 
         # --------------------------------------------------
-        # Save assistant tool-call message
+        # Preserve assistant tool-call message
         # --------------------------------------------------
 
         assistant_tool_calls = []
 
-        for tool_call in response.message.tool_calls:
+        for tool_call in tool_calls:
 
             tool_name = tool_call.function.name
             arguments = tool_call.function.arguments or {}
@@ -290,14 +261,18 @@ def run_agent(user_question, conversation_id=None):
         # Execute tools
         # --------------------------------------------------
 
-        for tool_call in response.message.tool_calls:
+        for tool_call in tool_calls:
 
             tool_name = tool_call.function.name
             arguments = tool_call.function.arguments or {}
 
             tool_start = time.perf_counter()
 
-            result = execute_tool(tool_call)
+            result = execute_tool(
+                tool_name=tool_name,
+                df=df,
+                arguments=arguments,
+            )
 
             tool_duration = (
                 time.perf_counter()
@@ -312,15 +287,17 @@ def run_agent(user_question, conversation_id=None):
                     "duration": tool_duration,
                 }
             )
+	    tracer.record_tool_call(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=result,
+                duration=tool_duration,
+            )
 
             print(
                 f"[TOOL] {tool_name} "
                 f"{tool_duration:.3f}s"
             )
-
-            # --------------------------------------------------
-            # Add tool result to current LLM context
-            # --------------------------------------------------
 
             messages.append(
                 {
@@ -329,26 +306,22 @@ def run_agent(user_question, conversation_id=None):
                 }
             )
 
-        # --------------------------------------------------
-        # Continue loop
-        # LLM will now process the tool result
-        # --------------------------------------------------
-
     # --------------------------------------------------
-    # Calculate total execution time
+    # Total execution time
     # --------------------------------------------------
 
     total_time = (
         time.perf_counter()
         - start_time
     )
+    trace = tracer.finish(final_answer)
 
     print(
         f"[TOTAL] {total_time:.2f}s"
     )
 
     # --------------------------------------------------
-    # Return result
+    # Return structured result
     # --------------------------------------------------
 
     return {
@@ -356,5 +329,6 @@ def run_agent(user_question, conversation_id=None):
         "tool_calls": executed_tools,
         "execution_time": total_time,
         "conversation_id": conversation_id,
-        "conversation": conversation,
+        "conversation": memory.get(conversation_id),
+        "trace": trace,
     }

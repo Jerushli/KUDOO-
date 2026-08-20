@@ -45,4 +45,5 @@ def chat(request: ChatRequest):
         "conversation_id": conversation_id,
         "tool_calls": result["tool_calls"],
         "execution_time": result["execution_time"],
+        "trace": result["trace"],
     }
