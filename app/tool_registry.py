@@ -210,7 +210,10 @@ TOOLS = [
 
             "description": (
                 "Calculate what percentage of total revenue came from "
-                "ONE SPECIFIC PRODUCT or ONE SPECIFIC REGION."
+                "ONE SPECIFIC PRODUCT or ONE SPECIFIC REGION. "
+                "For a best-product or best-region compound question, "
+                "wait for that tool's result and use its exact returned "
+                "entity as filter_value. Never use a tool name as a value."
             ),
 
             "parameters": {

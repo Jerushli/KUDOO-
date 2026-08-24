@@ -5,9 +5,11 @@ from app.tools import (
     get_best_product,
     get_best_region,
     get_product_revenue,
+    get_revenue_by_region,
     get_revenue_difference,
     get_percentage_of_total,
 )
+from app.tool_executor import normalize_tool_arguments
 
 
 df = load_data()
@@ -67,6 +69,53 @@ def test_unknown_product():
     assert result["success"] is False
 
     assert result["error_type"] == "UNKNOWN_PRODUCT"
+
+
+def test_unknown_region():
+    result = get_revenue_by_region(
+        df,
+        "Central",
+    )
+
+    assert result["success"] is False
+    assert result["error_type"] == "UNKNOWN_REGION"
+
+
+def test_product_arguments_are_canonicalized():
+    for value in ["phone", "PHONE", "Phone", "laptop", "Laptop"]:
+        arguments = normalize_tool_arguments(
+            "get_product_revenue",
+            df,
+            {"product": value},
+        )
+
+        assert arguments["product"] in {"Phone", "Laptop"}
+
+
+def test_region_arguments_are_canonicalized():
+    arguments = normalize_tool_arguments(
+        "get_revenue_by_region",
+        df,
+        {"region": "north"},
+    )
+
+    assert arguments["region"] == "North"
+
+
+def test_invalid_entities_are_not_rewritten():
+    product_arguments = normalize_tool_arguments(
+        "get_product_revenue",
+        df,
+        {"product": "Tesla"},
+    )
+    region_arguments = normalize_tool_arguments(
+        "get_revenue_by_region",
+        df,
+        {"region": "Central"},
+    )
+
+    assert product_arguments["product"] == "Tesla"
+    assert region_arguments["region"] == "Central"
 
 
 def test_revenue_difference():
